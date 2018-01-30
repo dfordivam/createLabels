@@ -12,17 +12,27 @@ import Import
 import Codec.Xlsx.Types
 import Codec.Xlsx.Parser
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import Control.Lens
 import qualified Data.Map as Map
+import System.Process
 
-parseExcelAndMakeTex bs = do
+parseExcelAndMakePdf bs lp = do
   let
-    fds = getDataFromExcel bs
+    fds = getDataFromExcel (BSL.fromStrict bs)
+    badRows = map fst $ filter (isNothing . snd) $ Map.assocs fds
     is = catMaybes $ Map.elems fds
-  makeLatexFile is def
+    tex = makeLatexFile is lp
+  if null badRows
+    then do
+      T.writeFile "out.tex" tex
+      createProcess (proc "tectonic" ["out.tex"])
+      return (Right ())
+    else
+      return $ Left badRows
 
 data ForeignData = ForeignData
   {
@@ -37,7 +47,7 @@ data ForeignData = ForeignData
     , addr4FD :: Maybe Text
     , addr5FD :: Maybe Text
     , cityFD :: Text
-    , countryFD :: Text
+    , countryFD :: Maybe Text
   }
   deriving (Show)
 
@@ -62,7 +72,7 @@ parseOneRow cm r = (,) r $ ForeignData
   <*> pure (fromCellText =<< _cellValue =<< Map.lookup (r,10) cm)
   <*> pure (fromCellText =<< _cellValue =<< Map.lookup (r,11) cm)
   <*> (fromCellText =<< _cellValue =<< Map.lookup (r,12) cm) -- cityFD
-  <*> (fromCellText =<< _cellValue =<< Map.lookup (r,13) cm)
+  <*> pure (fromCellText =<< _cellValue =<< Map.lookup (r,13) cm)
   where fromCellText (CellText t) = Just t
         fromCellText _ = Nothing
         intFromCellText (CellDouble d) = Just $ floor d
@@ -86,8 +96,8 @@ data LatexParams = LatexParams
 instance Default LatexParams where
   def = LatexParams 7 7 10 20 0 0 0 0 0 0
 
-makeLatexFile is lp = do
-  let
+makeLatexFile is lp = mconcat $ header : ((map item is) ++ [footer])
+  where
     header = mconcat
       [ "\\documentclass[a4paper]{article}\n"
       , "\\usepackage[newdimens]{labels}  \n"
@@ -116,13 +126,13 @@ makeLatexFile is lp = do
       , "\\scriptsize\\sf\n"
       , "F-", (tshow $ numFD i), "/", (tshow $ monthFD i), "/", (tshow $ yearFD i), "\n"
       , "\\qquad ", (tshow $ qtyFD i), "\\\\\n"
-      , "\\small\\sf\n"
+      , "\\normalsize\\sf\n"
       , (nameFD i), "\\\\\n"
       , (addr1FD i), "\\\\\n"]
       ++ (addr23 i) ++
       [ (tm2 (addr4FD i) (addr5FD i))
       , (cityFD i), "\\\\\n"
-      , (countryFD i), "\\\\\n"
+      , tm (countryFD i)
       , "}\n"
       ]
     addr23 i = case (addr4FD i) of
@@ -133,6 +143,3 @@ makeLatexFile is lp = do
     tm2 Nothing _ = ""
     tm2 (Just t) Nothing = t <> "\\\\\n"
     tm2 (Just t1) (Just t2) = t1 <>", " <> t2 <>"\\\\\n"
-
-    content = mconcat $ header : ((map item is) ++ [footer])
-  T.writeFile "out.tex" content
