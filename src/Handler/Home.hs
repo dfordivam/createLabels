@@ -56,7 +56,7 @@ postHomeR = do
             setMessage (toHtml $ "Cannot Parse rows: " <> tshow badRows)
             redirect HomeR
           (Right _) -> do
-          sendFile "application/pdf" "out.pdf"
+            sendFile "application/pdf" "out.pdf"
       Nothing -> do
         setMessage ("Error uploading File")
         redirect HomeR
